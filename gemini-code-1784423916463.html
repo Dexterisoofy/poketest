@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokémon TCG Universal Simulator</title>
+    <style>
+        :root {
+            --primary: #3b4cca;
+            --secondary: #ffde00;
+            --background: #1a1a1a;
+            --text: #ffffff;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--background);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        nav {
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: 2px solid var(--secondary);
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: transform 0.1s;
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        button:disabled {
+            background-color: #555;
+            border-color: #333;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #status-message {
+            color: var(--secondary);
+            font-weight: bold;
+            margin-bottom: 20px;
+            min-height: 20px;
+        }
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 15px;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            transition: transform 0.2s;
+            animation: popIn 0.4s ease-out;
+        }
+        .card:hover {
+            transform: translateY(-5px) scale(1.05);
+            box-shadow: 0 8px 16px rgba(255, 222, 0, 0.4);
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Universal Pokémon Pack Simulator</h1>
+    
+    <nav>
+        <button id="nav-pack" onclick="switchView('pack')">Open Packs</button>
+        <button id="nav-collection" onclick="switchView('collection')">My Collection</button>
+    </nav>
+
+    <div id="status-message">Loading API Data...</div>
+
+    <div id="view-pack">
+        <button id="btn-open" onclick="openPack()" disabled>Pull 10 Cards!</button>
+        <div id="pack-display" class="card-grid"></div>
+    </div>
+
+    <div id="view-collection" class="hidden">
+        <h2>Your Collection (<span id="collection-count">0</span> cards)</h2>
+        <button onclick="clearCollection()" style="background-color: #cc0000; font-size: 12px;">Reset Collection</button>
+        <div id="collection-display" class="card-grid"></div>
+    </div>
+
+    <script>
+        // --- 1. GAME STATE & DATA ---
+        let universalPool = []; // Will hold the API data
+        // Load the saved JSON collection from the browser's local storage
+        let playerCollection = JSON.parse(localStorage.getItem('pokemonCollection')) || [];
+
+        const API_URL = 'https://api.pokemontcg.io/v2/cards?pageSize=250&page=';
+
+        // --- 2. INITIALIZATION ---
+        async function fetchCards() {
+            try {
+                // Fetch a random page of 250 cards to simulate the massive pool
+                const randomPage = Math.floor(Math.random() * 50) + 1; 
+                const response = await fetch(API_URL + randomPage);
+                const data = await response.json();
+                
+                universalPool = data.data;
+                
+                document.getElementById('status-message').innerText = `Successfully loaded ${universalPool.length} cards into the pool!`;
+                document.getElementById('btn-open').disabled = false;
+                
+                updateCollectionCount();
+            } catch (error) {
+                document.getElementById('status-message').innerText = "Error connecting to the Pokémon API. Please refresh.";
+                console.error("API Error:", error);
+            }
+        }
+
+        // --- 3. CORE LOGIC ---
+        function openPack() {
+            if (universalPool.length === 0) return;
+
+            const packDisplay = document.getElementById('pack-display');
+            packDisplay.innerHTML = ''; // Clear previous pack
+            document.getElementById('status-message').innerText = "Opening pack...";
+
+            const currentPack = [];
+
+            // Pull 10 random cards
+            for (let i = 0; i < 10; i++) {
+                // In a true universal app, your weighted rarity logic from Step 2 would go here.
+                // For this prototype, we pick randomly from the fetched pool.
+                const randomCard = universalPool[Math.floor(Math.random() * universalPool.length)];
+                currentPack.push(randomCard);
+                
+                // Add to player's persistent collection
+                playerCollection.push({
+                    id: randomCard.id,
+                    name: randomCard.name,
+                    image: randomCard.images.small,
+                    rarity: randomCard.rarity || 'Unknown'
+                });
+            }
+
+            // Save the updated JSON to local storage
+            saveCollection();
+
+            // Display the newly pulled cards
+            currentPack.forEach((card, index) => {
+                // Stagger the rendering slightly for a "pack opening" feel
+                setTimeout(() => {
+                    const img = document.createElement('img');
+                    img.src = card.images.small;
+                    img.className = 'card';
+                    img.alt = card.name;
+                    packDisplay.appendChild(img);
+                }, index * 150); 
+            });
+
+            setTimeout(() => {
+                document.getElementById('status-message').innerText = "Pack opened! Cards added to your collection.";
+            }, 1500);
+        }
+
+        // --- 4. DATA MANAGEMENT ---
+        function saveCollection() {
+            // Converts the array into a JSON string and saves it to the browser
+            localStorage.setItem('pokemonCollection', JSON.stringify(playerCollection));
+            updateCollectionCount();
+        }
+
+        function clearCollection() {
+            if(confirm("Are you sure you want to delete your entire collection?")) {
+                playerCollection = [];
+                saveCollection();
+                renderCollection();
+            }
+        }
+
+        // --- 5. UI & NAVIGATION ---
+        function switchView(view) {
+            document.getElementById('view-pack').className = view === 'pack' ? '' : 'hidden';
+            document.getElementById('view-collection').className = view === 'collection' ? '' : 'hidden';
+            
+            document.getElementById('status-message').innerText = '';
+
+            if (view === 'collection') {
+                renderCollection();
+            } else {
+                document.getElementById('pack-display').innerHTML = ''; // Clean up pack view when returning
+            }
+        }
+
+        function renderCollection() {
+            const collectionDisplay = document.getElementById('collection-display');
+            collectionDisplay.innerHTML = '';
+
+            // Reverse the array so newest cards show up first
+            const displayList = [...playerCollection].reverse();
+
+            if (displayList.length === 0) {
+                collectionDisplay.innerHTML = "<p>Your collection is empty. Go open some packs!</p>";
+                return;
+            }
+
+            displayList.forEach(card => {
+                const img = document.createElement('img');
+                img.src = card.image;
+                img.className = 'card';
+                img.alt = card.name;
+                collectionDisplay.appendChild(img);
+            });
+        }
+
+        function updateCollectionCount() {
+            document.getElementById('collection-count').innerText = playerCollection.length;
+        }
+
+        // Start the game!
+        fetchCards();
+    </script>
+</body>
+</html>
