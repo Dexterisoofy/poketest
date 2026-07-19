@@ -207,13 +207,52 @@
         }
 
         // --- 3. PACK OPENING LOGIC ---
+        
+        // NEW: Calculate the pull rate weight based on rarity
+        function getWeightForRarity(rarity) {
+            if (!rarity) return 200; // Default to common weight if missing
+            const r = rarity.toLowerCase();
+            
+            // Lowest odds (Secret Rares, Alt Arts)
+            if (r.includes('secret') || r.includes('hyper') || r.includes('special illustration')) return 1;
+            // Low odds (Ultra Rares, VMAX, VSTAR, etc.)
+            if (r.includes('ultra') || r.includes('vmax') || r.includes('vstar') || r.includes('illustration') || r.includes('legend')) return 4;
+            // Medium odds (Holo Rares, standard Rares)
+            if (r.includes('rare')) return 15;
+            // High odds (Uncommon)
+            if (r.includes('uncommon')) return 60;
+            // Very High odds (Common)
+            if (r.includes('common')) return 200;
+            
+            return 20; // Fallback for unknown rarities
+        }
+
+        // NEW: Select a card using the weighted probabilities
+        function getRandomCardWeighted(pool) {
+            let totalWeight = 0;
+            const weights = pool.map(card => {
+                const weight = getWeightForRarity(card.rarity);
+                totalWeight += weight;
+                return weight;
+            });
+
+            let randomVal = Math.random() * totalWeight;
+            for (let i = 0; i < pool.length; i++) {
+                randomVal -= weights[i];
+                if (randomVal <= 0) {
+                    return pool[i];
+                }
+            }
+            return pool[Math.floor(Math.random() * pool.length)]; // Fallback
+        }
+
         function openPack() {
             if (universalPool.length === 0) return;
             
-            // Generate a pack of 10 random cards from our API pool
+            // Generate a pack of 10 random cards using weighted probabilities
             currentPackCards = [];
             for (let i = 0; i < 10; i++) {
-                currentPackCards.push(universalPool[Math.floor(Math.random() * universalPool.length)]);
+                currentPackCards.push(getRandomCardWeighted(universalPool));
             }
             
             currentCardIndex = 0;
