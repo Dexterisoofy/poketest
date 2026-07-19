@@ -10,6 +10,7 @@
             --secondary: #ffde00;
             --background: #1a1a1a;
             --text: #ffffff;
+            --accent: #4CAF50;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -31,7 +32,7 @@
             font-weight: bold;
             border-radius: 8px;
             cursor: pointer;
-            margin: 0 10px;
+            margin: 10px;
             transition: transform 0.1s;
         }
         button:hover {
@@ -46,9 +47,26 @@
         #status-message {
             color: var(--secondary);
             font-weight: bold;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             min-height: 20px;
         }
+        #dashboard {
+            background: #2a2a2a;
+            padding: 10px;
+            border-radius: 10px;
+            display: inline-block;
+            margin-bottom: 20px;
+            border: 1px solid #444;
+        }
+        #dashboard h3 {
+            margin: 0;
+            color: var(--secondary);
+        }
+        #total-value {
+            color: var(--accent);
+        }
+        
+        /* Collection Grid */
         .card-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -57,23 +75,69 @@
             max-width: 1200px;
             margin: 0 auto;
         }
-        .card {
+        .card-grid img {
             width: 100%;
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.5);
             transition: transform 0.2s;
-            animation: popIn 0.4s ease-out;
         }
-        .card:hover {
+        .card-grid img:hover {
             transform: translateY(-5px) scale(1.05);
             box-shadow: 0 8px 16px rgba(255, 222, 0, 0.4);
         }
-        @keyframes popIn {
-            0% { transform: scale(0.5); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
+
+        /* 3D Flip Card CSS */
+        .flip-card {
+            background-color: transparent;
+            width: 300px;
+            height: 418px;
+            perspective: 1000px;
+            margin: 0 auto;
+            cursor: pointer;
+        }
+        .flip-card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            text-align: center;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .flip-card.revealed .flip-card-inner {
+            transform: rotateY(180deg);
+        }
+        .flip-card-front, .flip-card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            border-radius: 15px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.6);
+        }
+        .flip-card-front img, .flip-card-back img {
+            width: 100%;
+            height: 100%;
+            border-radius: 15px;
+            object-fit: cover;
+        }
+        .flip-card-back {
+            transform: rotateY(180deg);
+        }
+
+        /* Animations & Helpers */
+        .price-tag {
+            font-size: 28px;
+            color: var(--accent);
+            font-weight: bold;
+            margin: 20px 0;
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         .hidden {
-            display: none;
+            display: none !important;
         }
     </style>
 </head>
@@ -81,6 +145,10 @@
 
     <h1>Universal Pokémon Pack Simulator</h1>
     
+    <div id="dashboard">
+        <h3>Total Collection Value: <span id="total-value">$0.00</span></h3>
+    </div>
+
     <nav>
         <button id="nav-pack" onclick="switchView('pack')">Open Packs</button>
         <button id="nav-collection" onclick="switchView('collection')">My Collection</button>
@@ -89,116 +157,194 @@
     <div id="status-message">Loading API Data...</div>
 
     <div id="view-pack">
-        <button id="btn-open" onclick="openPack()" disabled>Pull 10 Cards!</button>
-        <div id="pack-display" class="card-grid"></div>
+        <button id="btn-open" onclick="openPack()" disabled>Open a Pack (10 Cards)</button>
+        
+        <div id="pack-opener-view" class="hidden">
+            <h2 id="pack-counter">Card 1 of 10</h2>
+            <div id="single-card-display"></div>
+        </div>
     </div>
 
     <div id="view-collection" class="hidden">
         <h2>Your Collection (<span id="collection-count">0</span> cards)</h2>
-        <button onclick="clearCollection()" style="background-color: #cc0000; font-size: 12px;">Reset Collection</button>
+        <button onclick="clearCollection()" style="background-color: #cc0000; font-size: 12px; border-color: #aa0000;">Reset Collection & Value</button>
         <div id="collection-display" class="card-grid"></div>
     </div>
 
     <script>
         // --- 1. GAME STATE & DATA ---
-        let universalPool = []; // Will hold the API data
-        // Load the saved JSON collection from the browser's local storage
+        let universalPool = []; 
+        let currentPackCards = [];
+        let currentCardIndex = 0;
+
+        // Load saved data from browser
         let playerCollection = JSON.parse(localStorage.getItem('pokemonCollection')) || [];
+        let totalValue = parseFloat(localStorage.getItem('pokemonTotalValue')) || 0;
 
         const API_URL = 'https://api.pokemontcg.io/v2/cards?pageSize=250&page=';
+        const CARD_BACK_URL = 'https://upload.wikimedia.org/wikipedia/en/3/3b/Pokemon_Trading_Card_Game_cardback.jpg';
+
+        // Initialize dashboard
+        updateValueDisplay();
 
         // --- 2. INITIALIZATION ---
         async function fetchCards() {
             try {
-                // Fetch a random page of 250 cards to simulate the massive pool
                 const randomPage = Math.floor(Math.random() * 50) + 1; 
                 const response = await fetch(API_URL + randomPage);
                 const data = await response.json();
                 
                 universalPool = data.data;
                 
-                document.getElementById('status-message').innerText = `Successfully loaded ${universalPool.length} cards into the pool!`;
+                document.getElementById('status-message').innerText = "Pool loaded! Ready to open packs.";
                 document.getElementById('btn-open').disabled = false;
                 
                 updateCollectionCount();
             } catch (error) {
-                document.getElementById('status-message').innerText = "Error connecting to the Pokémon API. Please refresh.";
-                console.error("API Error:", error);
+                document.getElementById('status-message').innerText = "Error connecting to the API.";
+                console.error(error);
             }
         }
 
-        // --- 3. CORE LOGIC ---
+        // --- 3. PACK OPENING LOGIC ---
         function openPack() {
             if (universalPool.length === 0) return;
-
-            const packDisplay = document.getElementById('pack-display');
-            packDisplay.innerHTML = ''; // Clear previous pack
-            document.getElementById('status-message').innerText = "Opening pack...";
-
-            const currentPack = [];
-
-            // Pull 10 random cards
+            
+            // Generate a pack of 10 random cards from our API pool
+            currentPackCards = [];
             for (let i = 0; i < 10; i++) {
-                // In a true universal app, your weighted rarity logic from Step 2 would go here.
-                // For this prototype, we pick randomly from the fetched pool.
-                const randomCard = universalPool[Math.floor(Math.random() * universalPool.length)];
-                currentPack.push(randomCard);
-                
-                // Add to player's persistent collection
-                playerCollection.push({
-                    id: randomCard.id,
-                    name: randomCard.name,
-                    image: randomCard.images.small,
-                    rarity: randomCard.rarity || 'Unknown'
-                });
+                currentPackCards.push(universalPool[Math.floor(Math.random() * universalPool.length)]);
             }
-
-            // Save the updated JSON to local storage
-            saveCollection();
-
-            // Display the newly pulled cards
-            currentPack.forEach((card, index) => {
-                // Stagger the rendering slightly for a "pack opening" feel
-                setTimeout(() => {
-                    const img = document.createElement('img');
-                    img.src = card.images.small;
-                    img.className = 'card';
-                    img.alt = card.name;
-                    packDisplay.appendChild(img);
-                }, index * 150); 
-            });
-
-            setTimeout(() => {
-                document.getElementById('status-message').innerText = "Pack opened! Cards added to your collection.";
-            }, 1500);
+            
+            currentCardIndex = 0;
+            document.getElementById('btn-open').classList.add('hidden');
+            document.getElementById('pack-opener-view').classList.remove('hidden');
+            document.getElementById('status-message').innerText = "Click the card to reveal it!";
+            
+            renderSingleCard();
         }
 
-        // --- 4. DATA MANAGEMENT ---
-        function saveCollection() {
-            // Converts the array into a JSON string and saves it to the browser
+        function renderSingleCard() {
+            const card = currentPackCards[currentCardIndex];
+            const displayArea = document.getElementById('single-card-display');
+            
+            document.getElementById('pack-counter').innerText = `Card ${currentCardIndex + 1} of 10`;
+            
+            // Build the HTML for the flip card
+            displayArea.innerHTML = `
+                <div class="flip-card" onclick="revealCard(this)">
+                    <div class="flip-card-inner">
+                        <div class="flip-card-front">
+                            <img src="${CARD_BACK_URL}" alt="Card Back">
+                        </div>
+                        <div class="flip-card-back">
+                            <img src="${card.images.large || card.images.small}" alt="${card.name}">
+                        </div>
+                    </div>
+                </div>
+                <div id="card-price" class="hidden price-tag"></div>
+                <br>
+                <button id="btn-next" class="hidden" onclick="nextCard()">Next Card</button>
+            `;
+        }
+
+        // --- 4. CARD REVEAL & VALUE CALCULATION ---
+        function getCardPrice(card) {
+            // Drill down into the API's TCGPlayer pricing object
+            if (card.tcgplayer && card.tcgplayer.prices) {
+                const prices = card.tcgplayer.prices;
+                // Prefer holofoil or normal market prices
+                if (prices.holofoil && prices.holofoil.market) return prices.holofoil.market;
+                if (prices.normal && prices.normal.market) return prices.normal.market;
+                if (prices['1stEditionHolofoil'] && prices['1stEditionHolofoil'].market) return prices['1stEditionHolofoil'].market;
+                if (prices.reverseHolofoil && prices.reverseHolofoil.market) return prices.reverseHolofoil.market;
+                
+                // Fallback to any available market price
+                for (let key in prices) {
+                    if (prices[key].market) return prices[key].market;
+                }
+            }
+            return 0.00; // No price data found
+        }
+
+        function revealCard(element) {
+            if (element.classList.contains('revealed')) return; // Prevent double-clicks
+            
+            element.classList.add('revealed');
+            const card = currentPackCards[currentCardIndex];
+            
+            // 1. Calculate and add price
+            const price = getCardPrice(card);
+            totalValue += price;
+            
+            // 2. Add to permanent collection
+            playerCollection.push({
+                id: card.id,
+                name: card.name,
+                image: card.images.small,
+                price: price
+            });
+            
+            saveData();
+            updateValueDisplay();
+
+            // 3. Update UI after the CSS flip animation finishes (600ms)
+            setTimeout(() => {
+                const priceTag = document.getElementById('card-price');
+                priceTag.innerText = `Value: $${price.toFixed(2)}`;
+                priceTag.classList.remove('hidden');
+                
+                const btnNext = document.getElementById('btn-next');
+                btnNext.innerText = (currentCardIndex < 9) ? "Next Card" : "Finish Pack";
+                btnNext.classList.remove('hidden');
+                
+                document.getElementById('status-message').innerText = "";
+            }, 600);
+        }
+
+        function nextCard() {
+            currentCardIndex++;
+            if (currentCardIndex < 10) {
+                renderSingleCard(); // Show next face-down card
+            } else {
+                // End of pack
+                document.getElementById('pack-opener-view').classList.add('hidden');
+                document.getElementById('btn-open').classList.remove('hidden');
+                document.getElementById('status-message').innerText = "Pack completed! Open another?";
+            }
+        }
+
+        // --- 5. DATA MANAGEMENT & UI ---
+        function saveData() {
             localStorage.setItem('pokemonCollection', JSON.stringify(playerCollection));
+            localStorage.setItem('pokemonTotalValue', totalValue);
             updateCollectionCount();
         }
 
+        function updateValueDisplay() {
+            document.getElementById('total-value').innerText = `$${totalValue.toFixed(2)}`;
+        }
+
+        function updateCollectionCount() {
+            document.getElementById('collection-count').innerText = playerCollection.length;
+        }
+
         function clearCollection() {
-            if(confirm("Are you sure you want to delete your entire collection?")) {
+            if(confirm("Are you sure you want to delete your entire collection and reset your value to $0.00?")) {
                 playerCollection = [];
-                saveCollection();
+                totalValue = 0;
+                saveData();
                 renderCollection();
+                updateValueDisplay();
             }
         }
 
-        // --- 5. UI & NAVIGATION ---
         function switchView(view) {
             document.getElementById('view-pack').className = view === 'pack' ? '' : 'hidden';
             document.getElementById('view-collection').className = view === 'collection' ? '' : 'hidden';
             
-            document.getElementById('status-message').innerText = '';
-
             if (view === 'collection') {
                 renderCollection();
-            } else {
-                document.getElementById('pack-display').innerHTML = ''; // Clean up pack view when returning
             }
         }
 
@@ -206,28 +352,23 @@
             const collectionDisplay = document.getElementById('collection-display');
             collectionDisplay.innerHTML = '';
 
-            // Reverse the array so newest cards show up first
-            const displayList = [...playerCollection].reverse();
+            const displayList = [...playerCollection].reverse(); // Newest first
 
             if (displayList.length === 0) {
-                collectionDisplay.innerHTML = "<p>Your collection is empty. Go open some packs!</p>";
+                collectionDisplay.innerHTML = "<p>Your collection is empty.</p>";
                 return;
             }
 
             displayList.forEach(card => {
                 const img = document.createElement('img');
                 img.src = card.image;
-                img.className = 'card';
                 img.alt = card.name;
+                img.title = `${card.name} - $${card.price.toFixed(2)}`; // Hover tooltip
                 collectionDisplay.appendChild(img);
             });
         }
 
-        function updateCollectionCount() {
-            document.getElementById('collection-count').innerText = playerCollection.length;
-        }
-
-        // Start the game!
+        // Start the engine
         fetchCards();
     </script>
 </body>
