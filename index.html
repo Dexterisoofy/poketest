@@ -23,6 +23,22 @@
         nav {
             margin-bottom: 20px;
         }
+        /* New styling for the set selector to match your UI */
+        select {
+            background-color: #2a2a2a;
+            color: white;
+            border: 2px solid var(--primary);
+            padding: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+            outline: none;
+        }
+        select:focus {
+            border-color: var(--secondary);
+        }
         button {
             background-color: var(--primary);
             color: white;
@@ -150,11 +166,15 @@
     </div>
 
     <nav>
+        <select id="set-select" onchange="loadCardsForSet()">
+            <option value="">Loading Sets...</option>
+        </select>
+        
         <button id="nav-pack" onclick="switchView('pack')">Open Packs</button>
         <button id="nav-collection" onclick="switchView('collection')">My Collection</button>
     </nav>
 
-    <div id="status-message">Loading API Data...</div>
+    <div id="status-message">Initializing API...</div>
 
     <div id="view-pack">
         <button id="btn-open" onclick="openPack()" disabled>Open a Pack (10 Cards)</button>
@@ -166,68 +186,98 @@
     </div>
 
     <div id="view-collection" class="hidden">
-        <h2>Your Collection (<span id="collection-count">0</span> cards)</h2>
-        <button onclick="clearCollection()" style="background-color: #cc0000; font-size: 12px; border-color: #aa0000;">Reset Collection & Value</button>
+        <h2>Collection for Current Set (<span id="collection-count">0</span> cards)</h2>
+        <button onclick="clearCurrentSetCollection()" style="background-color: #cc0000; font-size: 12px; border-color: #aa0000;">Reset THIS Set's Collection</button>
         <div id="collection-display" class="card-grid"></div>
     </div>
 
     <script>
         // --- 1. GAME STATE & DATA ---
-        let universalPool = []; 
+        let currentSetCards = []; // Cards for the currently selected set
         let currentPackCards = [];
         let currentCardIndex = 0;
 
-        // Load saved data from browser
-        let playerCollection = JSON.parse(localStorage.getItem('pokemonCollection')) || [];
+        // Load saved data from browser (now structured as an object of arrays mapped by set ID)
+        let playerCollections = JSON.parse(localStorage.getItem('pokemonSetCollections')) || {};
         let totalValue = parseFloat(localStorage.getItem('pokemonTotalValue')) || 0;
 
-        const API_URL = 'https://api.pokemontcg.io/v2/cards?pageSize=250&page=';
+        const SETS_API_URL = 'https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate';
+        const CARDS_API_URL = 'https://api.pokemontcg.io/v2/cards?q=set.id:';
         const CARD_BACK_URL = 'https://upload.wikimedia.org/wikipedia/en/3/3b/Pokemon_Trading_Card_Game_cardback.jpg';
 
         // Initialize dashboard
         updateValueDisplay();
 
-        // --- 2. INITIALIZATION ---
-        async function fetchCards() {
+        // --- 2. INITIALIZATION (FETCH SETS) ---
+        async function fetchSets() {
             try {
-                const randomPage = Math.floor(Math.random() * 50) + 1; 
-                const response = await fetch(API_URL + randomPage);
+                const response = await fetch(SETS_API_URL);
                 const data = await response.json();
                 
-                universalPool = data.data;
+                const selectElement = document.getElementById('set-select');
+                selectElement.innerHTML = ''; // Clear loading text
                 
-                document.getElementById('status-message').innerText = "Pool loaded! Ready to open packs.";
-                document.getElementById('btn-open').disabled = false;
+                // Populate dropdown with all sets
+                data.data.forEach(set => {
+                    const option = document.createElement('option');
+                    option.value = set.id;
+                    option.innerText = set.name;
+                    selectElement.appendChild(option);
+                });
+
+                // Load the first set automatically
+                loadCardsForSet();
                 
-                updateCollectionCount();
             } catch (error) {
-                document.getElementById('status-message').innerText = "Error connecting to the API.";
+                document.getElementById('status-message').innerText = "Error loading sets from API.";
                 console.error(error);
             }
         }
 
-        // --- 3. PACK OPENING LOGIC ---
-        
-        // NEW: Calculate the pull rate weight based on rarity
-        function getWeightForRarity(rarity) {
-            if (!rarity) return 200; // Default to common weight if missing
-            const r = rarity.toLowerCase();
-            
-            // Lowest odds (Secret Rares, Alt Arts)
-            if (r.includes('secret') || r.includes('hyper') || r.includes('special illustration')) return 1;
-            // Low odds (Ultra Rares, VMAX, VSTAR, etc.)
-            if (r.includes('ultra') || r.includes('vmax') || r.includes('vstar') || r.includes('illustration') || r.includes('legend')) return 4;
-            // Medium odds (Holo Rares, standard Rares)
-            if (r.includes('rare')) return 15;
-            // High odds (Uncommon)
-            if (r.includes('uncommon')) return 60;
-            // Very High odds (Common)
-            if (r.includes('common')) return 200;
-            
-            return 20; // Fallback for unknown rarities
+        // --- 3. LOAD CARDS FOR SPECIFIC SET ---
+        async function loadCardsForSet() {
+            const setId = document.getElementById('set-select').value;
+            if (!setId) return;
+
+            document.getElementById('status-message').innerText = "Loading set data...";
+            document.getElementById('btn-open').disabled = true;
+
+            try {
+                // Fetch all cards that belong to the selected set ID
+                const response = await fetch(CARDS_API_URL + setId + '&pageSize=250');
+                const data = await response.json();
+                
+                currentSetCards = data.data;
+                
+                const setName = document.getElementById('set-select').options[document.getElementById('set-select').selectedIndex].text;
+                document.getElementById('status-message').innerText = `${setName} loaded! Ready to open packs.`;
+                document.getElementById('btn-open').disabled = false;
+                
+                updateCollectionCount();
+                
+                // If user is currently looking at the collection menu, re-render it for the new set
+                if (!document.getElementById('view-collection').classList.contains('hidden')) {
+                    renderCollection();
+                }
+
+            } catch (error) {
+                document.getElementById('status-message').innerText = "Error loading cards for this set.";
+                console.error(error);
+            }
         }
 
-        // NEW: Select a card using the weighted probabilities
+        // --- 4. PACK OPENING LOGIC ---
+        function getWeightForRarity(rarity) {
+            if (!rarity) return 200; 
+            const r = rarity.toLowerCase();
+            if (r.includes('secret') || r.includes('hyper') || r.includes('special illustration')) return 1;
+            if (r.includes('ultra') || r.includes('vmax') || r.includes('vstar') || r.includes('illustration') || r.includes('legend')) return 4;
+            if (r.includes('rare')) return 15;
+            if (r.includes('uncommon')) return 60;
+            if (r.includes('common')) return 200;
+            return 20; 
+        }
+
         function getRandomCardWeighted(pool) {
             let totalWeight = 0;
             const weights = pool.map(card => {
@@ -243,16 +293,16 @@
                     return pool[i];
                 }
             }
-            return pool[Math.floor(Math.random() * pool.length)]; // Fallback
+            return pool[Math.floor(Math.random() * pool.length)]; 
         }
 
         function openPack() {
-            if (universalPool.length === 0) return;
+            if (currentSetCards.length === 0) return;
             
-            // Generate a pack of 10 random cards using weighted probabilities
             currentPackCards = [];
             for (let i = 0; i < 10; i++) {
-                currentPackCards.push(getRandomCardWeighted(universalPool));
+                // Pull heavily weighted odds from the CURRENT set only
+                currentPackCards.push(getRandomCardWeighted(currentSetCards));
             }
             
             currentCardIndex = 0;
@@ -269,7 +319,6 @@
             
             document.getElementById('pack-counter').innerText = `Card ${currentCardIndex + 1} of 10`;
             
-            // Build the HTML for the flip card
             displayArea.innerHTML = `
                 <div class="flip-card" onclick="revealCard(this)">
                     <div class="flip-card-inner">
@@ -287,37 +336,39 @@
             `;
         }
 
-        // --- 4. CARD REVEAL & VALUE CALCULATION ---
+        // --- 5. CARD REVEAL & VALUE CALCULATION ---
         function getCardPrice(card) {
-            // Drill down into the API's TCGPlayer pricing object
             if (card.tcgplayer && card.tcgplayer.prices) {
                 const prices = card.tcgplayer.prices;
-                // Prefer holofoil or normal market prices
                 if (prices.holofoil && prices.holofoil.market) return prices.holofoil.market;
                 if (prices.normal && prices.normal.market) return prices.normal.market;
                 if (prices['1stEditionHolofoil'] && prices['1stEditionHolofoil'].market) return prices['1stEditionHolofoil'].market;
                 if (prices.reverseHolofoil && prices.reverseHolofoil.market) return prices.reverseHolofoil.market;
                 
-                // Fallback to any available market price
                 for (let key in prices) {
                     if (prices[key].market) return prices[key].market;
                 }
             }
-            return 0.00; // No price data found
+            return 0.00; 
         }
 
         function revealCard(element) {
-            if (element.classList.contains('revealed')) return; // Prevent double-clicks
+            if (element.classList.contains('revealed')) return; 
             
             element.classList.add('revealed');
             const card = currentPackCards[currentCardIndex];
+            const setId = document.getElementById('set-select').value;
             
-            // 1. Calculate and add price
+            // Calculate and add price
             const price = getCardPrice(card);
             totalValue += price;
             
-            // 2. Add to permanent collection
-            playerCollection.push({
+            // Add to permanent collection mapped by specific SET ID
+            if (!playerCollections[setId]) {
+                playerCollections[setId] = [];
+            }
+            
+            playerCollections[setId].push({
                 id: card.id,
                 name: card.name,
                 image: card.images.small,
@@ -327,7 +378,6 @@
             saveData();
             updateValueDisplay();
 
-            // 3. Update UI after the CSS flip animation finishes (600ms)
             setTimeout(() => {
                 const priceTag = document.getElementById('card-price');
                 priceTag.innerText = `Value: $${price.toFixed(2)}`;
@@ -344,18 +394,17 @@
         function nextCard() {
             currentCardIndex++;
             if (currentCardIndex < 10) {
-                renderSingleCard(); // Show next face-down card
+                renderSingleCard(); 
             } else {
-                // End of pack
                 document.getElementById('pack-opener-view').classList.add('hidden');
                 document.getElementById('btn-open').classList.remove('hidden');
                 document.getElementById('status-message').innerText = "Pack completed! Open another?";
             }
         }
 
-        // --- 5. DATA MANAGEMENT & UI ---
+        // --- 6. DATA MANAGEMENT & UI ---
         function saveData() {
-            localStorage.setItem('pokemonCollection', JSON.stringify(playerCollection));
+            localStorage.setItem('pokemonSetCollections', JSON.stringify(playerCollections));
             localStorage.setItem('pokemonTotalValue', totalValue);
             updateCollectionCount();
         }
@@ -365,16 +414,32 @@
         }
 
         function updateCollectionCount() {
-            document.getElementById('collection-count').innerText = playerCollection.length;
+            const setId = document.getElementById('set-select').value;
+            const currentSetCollection = playerCollections[setId] || [];
+            document.getElementById('collection-count').innerText = currentSetCollection.length;
         }
 
-        function clearCollection() {
-            if(confirm("Are you sure you want to delete your entire collection and reset your value to $0.00?")) {
-                playerCollection = [];
-                totalValue = 0;
-                saveData();
+        function recalculateTotalValue() {
+            let total = 0;
+            for (const setId in playerCollections) {
+                playerCollections[setId].forEach(card => {
+                    total += card.price;
+                });
+            }
+            totalValue = total;
+            saveData();
+            updateValueDisplay();
+        }
+
+        function clearCurrentSetCollection() {
+            const setId = document.getElementById('set-select').value;
+            const setName = document.getElementById('set-select').options[document.getElementById('set-select').selectedIndex].text;
+            
+            if(confirm(`Are you sure you want to delete your entire collection for ${setName}?`)) {
+                playerCollections[setId] = [];
+                recalculateTotalValue(); // Fixes the global value to remove only this set's worth
                 renderCollection();
-                updateValueDisplay();
+                updateCollectionCount();
             }
         }
 
@@ -388,13 +453,16 @@
         }
 
         function renderCollection() {
+            const setId = document.getElementById('set-select').value;
+            const currentSetCollection = playerCollections[setId] || [];
+            
             const collectionDisplay = document.getElementById('collection-display');
             collectionDisplay.innerHTML = '';
 
-            const displayList = [...playerCollection].reverse(); // Newest first
+            const displayList = [...currentSetCollection].reverse(); 
 
             if (displayList.length === 0) {
-                collectionDisplay.innerHTML = "<p>Your collection is empty.</p>";
+                collectionDisplay.innerHTML = "<p>Your collection for this set is empty.</p>";
                 return;
             }
 
@@ -402,13 +470,13 @@
                 const img = document.createElement('img');
                 img.src = card.image;
                 img.alt = card.name;
-                img.title = `${card.name} - $${card.price.toFixed(2)}`; // Hover tooltip
+                img.title = `${card.name} - $${card.price.toFixed(2)}`; 
                 collectionDisplay.appendChild(img);
             });
         }
 
         // Start the engine
-        fetchCards();
+        fetchSets();
     </script>
 </body>
 </html>
