@@ -284,7 +284,9 @@
             "japanese leaders' stadium": 597.80, "legend maker": 887.50, "triumphant": 277.11,
             "call of legends": 718.38, "forbidden light": 31.00, "japanese inferno x": 7.05,
             "japanese tag all stars": 51.00, "japanese white flare": 4.25, "plasma storm": 450.00,
-            "rising rivals": 333.00, "ruby & sapphire": 577.42, "unseen forces": 1182.68
+            "rising rivals": 333.00, "ruby & sapphire": 577.42, "unseen forces": 1182.68,
+            "pitch black": 15.00,
+            "pitch-black": 15.00
         };
 
         let currentSetCards = []; 
@@ -557,7 +559,10 @@
             const slot = saveSlots[currentSlotIndex];
             
             const price = getCardPrice(card);
+            
+            // ADDED: Card value goes to Total Collection Value AND Bank Balance
             slot.totalValue = (slot.totalValue || 0) + price;
+            slot.bank = (slot.bank || 0) + price; 
             
             if (!slot.collections[setId]) {
                 slot.collections[setId] = [];
