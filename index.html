@@ -23,8 +23,7 @@
         nav {
             margin-bottom: 20px;
         }
-        /* New styling for the set selector to match your UI */
-        select {
+        select, input[type="number"] {
             background-color: #2a2a2a;
             color: white;
             border: 2px solid var(--primary);
@@ -36,7 +35,7 @@
             margin: 10px;
             outline: none;
         }
-        select:focus {
+        select:focus, input[type="number"]:focus {
             border-color: var(--secondary);
         }
         button {
@@ -68,18 +67,28 @@
         }
         #dashboard {
             background: #2a2a2a;
-            padding: 10px;
+            padding: 15px;
             border-radius: 10px;
             display: inline-block;
             margin-bottom: 20px;
             border: 1px solid #444;
         }
         #dashboard h3 {
-            margin: 0;
+            margin: 5px 0;
             color: var(--secondary);
         }
-        #total-value {
+        .money-text {
             color: var(--accent);
+        }
+        .bank-controls {
+            margin-top: 10px;
+            border-top: 1px solid #555;
+            padding-top: 10px;
+        }
+        .bank-controls button {
+            padding: 5px 10px;
+            font-size: 14px;
+            margin: 0 5px;
         }
         
         /* Collection Grid */
@@ -162,10 +171,31 @@
     <h1>Universal Pokémon Pack Simulator</h1>
     
     <div id="dashboard">
-        <h3>Total Collection Value: <span id="total-value">$0.00</span></h3>
+        <h3>Total Collection Value: <span id="total-value" class="money-text">$0.00</span></h3>
+        <h3>Bank Balance: <span id="bank-value" class="money-text">$0.00</span></h3>
+        
+        <div class="bank-controls">
+            <input type="number" id="bank-input" placeholder="Amount" step="0.01" style="width: 100px;">
+            <button onclick="modifyBank(true)">Add Funds</button>
+            <button onclick="modifyBank(false)">Remove Funds</button>
+        </div>
     </div>
 
     <nav>
+        <select id="slot-select" onchange="switchSlot()">
+            <option value="0">Save Slot 1</option>
+            <option value="1">Save Slot 2</option>
+            <option value="2">Save Slot 3</option>
+            <option value="3">Save Slot 4</option>
+            <option value="4">Save Slot 5</option>
+        </select>
+
+        <button onclick="exportSlot()">Export Slot</button>
+        <input type="file" id="import-file" class="hidden" accept=".json" onchange="importSlot(event)">
+        <button onclick="document.getElementById('import-file').click()">Import Slot</button>
+
+        <br>
+
         <select id="set-select" onchange="loadCardsForSet()">
             <option value="">Loading Sets...</option>
         </select>
@@ -177,7 +207,7 @@
     <div id="status-message">Initializing API...</div>
 
     <div id="view-pack">
-        <button id="btn-open" onclick="openPack()" disabled>Open a Pack (10 Cards)</button>
+        <button id="btn-open" onclick="openPack()" disabled>Open a Pack ($4.99)</button>
         
         <div id="pack-opener-view" class="hidden">
             <h2 id="pack-counter">Card 1 of 10</h2>
@@ -193,31 +223,113 @@
 
     <script>
         // --- 1. GAME STATE & DATA ---
-        let currentSetCards = []; // Cards for the currently selected set
-        let currentPackCards = [];
-        let currentCardIndex = 0;
-
-        // Load saved data from browser (now structured as an object of arrays mapped by set ID)
-        let playerCollections = JSON.parse(localStorage.getItem('pokemonSetCollections')) || {};
-        let totalValue = parseFloat(localStorage.getItem('pokemonTotalValue')) || 0;
-
         const SETS_API_URL = 'https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate';
         const CARDS_API_URL = 'https://api.pokemontcg.io/v2/cards?q=set.id:';
         const CARD_BACK_URL = 'https://upload.wikimedia.org/wikipedia/en/3/3b/Pokemon_Trading_Card_Game_cardback.jpg';
+        const DEFAULT_PACK_COST = 4.99; 
 
-        // Initialize dashboard
-        updateValueDisplay();
+        // Raw price tracking data parsed from provided copy-paste input
+        const PACK_PRICES = {
+            "rebel clash": 8.70, "ascended heroes": 15.85, "lost thunder": 50.00,
+            "crimson invasion": 17.75, "unbroken bonds": 44.07, "base set": 765.25, 
+            "champion's path": 16.02, "evolving skies": 43.55, "chinese gem pack 3": 15.48,
+            "japanese battle partners": 3.55, "power keepers": 665.00, "chaos rising": 8.97,
+            "gym heroes": 282.50, "prismatic evolutions": 19.50, "destined rivals": 12.50,
+            "japanese jungle": 706.16, "scarlet & violet 151": 31.62, "dragons exalted": 236.44,
+            "furious fists": 64.68, "platinum": 382.24, "japanese mystery of the fossils": 884.00,
+            "chinese gem pack 2": 17.50, "neo destiny": 1238.00, "japanese rocket gang": 1076.99,
+            "undaunted": 338.54, "unleashed": 655.00, "stellar crown": 10.45,
+            "phantasmal flames": 16.41, "sandstorm": 425.43, "evolutions": 63.00,
+            "2000 topps tv": 172.12, "arceus": 188.23, "next destinies": 202.14,
+            "japanese stellar miracle": 4.67, "neo revelation": 648.99, "pop series 5": 2012.75,
+            "generations": 279.95, "chinese gem pack 5": 13.08, "japanese crossing the ruins": 750.00,
+            "surging sparks": 10.03, "2000 topps movie": 220.29, "fusion strike": 16.81,
+            "fossil": 326.43, "lost origin": 18.94, "perfect order": 8.68,
+            "team up": 195.75, "twilight masquerade": 8.94, "crown zenith": 25.24,
+            "japanese mega dream ex": 16.16, "japanese night wanderer": 7.00, "team rocket": 314.20,
+            "mega evolution": 16.11, "cosmic eclipse": 82.00, "legendary collection": 3875.93,
+            "celebrations": 37.38, "chinese gem pack": 80.00, "breakthrough": 63.91,
+            "journey together": 10.25, "deoxys": 1525.00, "mcdonalds 2021": 9.59,
+            "paldean fates": 23.95, "japanese terastal festival": 15.50, "detective pikachu": 14.00,
+            "silver tempest": 12.71, "trick or trade 2022": 2.13, "white flare": 14.99,
+            "aquapolis": 1708.41, "hidden fates": 45.00, "astral radiance": 9.97,
+            "flashfire": 155.99, "japanese scarlet & violet 151": 44.31, "scarlet & violet": 9.44,
+            "skyridge": 3218.65, "chilling reign": 15.67, "majestic dawn": 500.00,
+            "sun & moon": 20.62, "mcdonalds 2024": 7.35, "neo genesis": 492.49,
+            "vivid voltage": 10.45, "ancient origins": 98.28, "burning shadows": 46.00,
+            "go": 9.99, "jungle": 388.00, "paradox rift": 11.18, "xy": 81.72,
+            "1999 topps tv": 88.02, "black bolt": 19.02, "crystal guardians": 809.00,
+            "japanese nihil zero": 9.65, "paldea evolved": 16.00, "shining fates": 15.84,
+            "shining legends": 108.00, "black & white": 150.01, "celestial storm": 55.45,
+            "dragon frontiers": 1127.09, "japanese 25th anniversary promo": 164.62,
+            "japanese cyber judge": 4.81, "obsidian flames": 11.59, "base set 2": 537.44,
+            "brilliant stars": 16.69, "expedition": 1637.65, "fates collide": 45.00,
+            "japanese mega symphonia": 3.09, "legendary treasures": 350.00, "roaring skies": 67.20,
+            "shrouded fable": 13.95, "1999 topps movie": 53.58, "guardians rising": 20.42,
+            "heartgold & soulsilver": 700.01, "sword & shield": 10.84, "darkness ablaze": 12.45,
+            "holon phantoms": 1675.00, "japanese expansion pack": 1554.63, "phantom forces": 149.26,
+            "steam siege": 27.91, "chinese 151 collect": 14.40, "double crisis": 399.19,
+            "emerald": 709.09, "neo discovery": 599.50, "supreme victors": 467.50,
+            "temporal forces": 10.75, "unified minds": 67.00, "battle styles": 8.99,
+            "diamond & pearl": 206.50, "dragon majesty": 87.97, "japanese black bolt": 5.50,
+            "japanese shiny treasure ex": 22.00, "japanese vstar universe": 43.00,
+            "mcdonalds 2022": 6.49, "secret wonders": 396.13, "team rocket returns": 1925.00,
+            "trick or trade 2024": 2.34, "ultra prism": 35.00, "breakpoint": 41.69,
+            "delta species": 1770.50, "dragon": 408.73, "emerging powers": 105.67,
+            "japanese eevee heroes": 55.87, "japanese glory of team rocket": 4.33,
+            "japanese gold, silver, new world": 875.00, "japanese mega brave": 2.16,
+            "japanese ruler of the black flame": 6.26, "plasma blast": 185.13,
+            "plasma freeze": 304.35, "primal clash": 66.56, "trick or trade 2023": 2.05,
+            "gym challenge": 392.12, "fire red & leaf green": 1039.96, "hidden legends": 480.00,
+            "japanese leaders' stadium": 597.80, "legend maker": 887.50, "triumphant": 277.11,
+            "call of legends": 718.38, "forbidden light": 31.00, "japanese inferno x": 7.05,
+            "japanese tag all stars": 51.00, "japanese white flare": 4.25, "plasma storm": 450.00,
+            "rising rivals": 333.00, "ruby & sapphire": 577.42, "unseen forces": 1182.68
+        };
 
-        // --- 2. INITIALIZATION (FETCH SETS) ---
+        let currentSetCards = []; 
+        let currentPackCards = [];
+        let currentCardIndex = 0;
+
+        let saveSlots = JSON.parse(localStorage.getItem('pokemonSaveSlots')) || Array.from({length: 5}, () => ({
+            collections: {},
+            totalValue: 0,
+            bank: 50.00 
+        }));
+        
+        let currentSlotIndex = 0;
+
+        // Helper to query the live cost of the current set
+        function getCurrentPackCost() {
+            const selectElement = document.getElementById('set-select');
+            if (!selectElement || !selectElement.value) return DEFAULT_PACK_COST;
+            
+            const setName = selectElement.options[selectElement.selectedIndex].text.toLowerCase();
+            
+            // Attempt to look up variations inside the text dataset
+            for (let key in PACK_PRICES) {
+                if (setName.includes(key) || key.includes(setName)) {
+                    return PACK_PRICES[key];
+                }
+            }
+            return DEFAULT_PACK_COST;
+        }
+
+        // --- 2. INITIALIZATION ---
+        async function init() {
+            document.getElementById('slot-select').value = "0"; 
+            refreshDashboard();
+            await fetchSets();
+        }
+
         async function fetchSets() {
             try {
                 const response = await fetch(SETS_API_URL);
                 const data = await response.json();
                 
                 const selectElement = document.getElementById('set-select');
-                selectElement.innerHTML = ''; // Clear loading text
+                selectElement.innerHTML = ''; 
                 
-                // Populate dropdown with all sets
                 data.data.forEach(set => {
                     const option = document.createElement('option');
                     option.value = set.id;
@@ -225,16 +337,91 @@
                     selectElement.appendChild(option);
                 });
 
-                // Load the first set automatically
                 loadCardsForSet();
-                
             } catch (error) {
                 document.getElementById('status-message').innerText = "Error loading sets from API.";
                 console.error(error);
             }
         }
 
-        // --- 3. LOAD CARDS FOR SPECIFIC SET ---
+        // --- 3. SLOT & BANK MANAGEMENT ---
+        function switchSlot() {
+            currentSlotIndex = parseInt(document.getElementById('slot-select').value);
+            refreshDashboard();
+            
+            if (!document.getElementById('view-collection').classList.contains('hidden')) {
+                renderCollection();
+            }
+            document.getElementById('status-message').innerText = `Switched to Save Slot ${currentSlotIndex + 1}`;
+        }
+
+        function refreshDashboard() {
+            const slot = saveSlots[currentSlotIndex];
+            document.getElementById('total-value').innerText = `$${(slot.totalValue || 0).toFixed(2)}`;
+            document.getElementById('bank-value').innerText = `$${(slot.bank || 0).toFixed(2)}`;
+            updateCollectionCount();
+            
+            // Dynamically refresh the UI text on the open pack button to reflect real set parameters
+            const currentCost = getCurrentPackCost();
+            document.getElementById('btn-open').innerText = `Open a Pack ($${currentCost.toFixed(2)})`;
+        }
+
+        function modifyBank(isAdding) {
+            const input = document.getElementById('bank-input');
+            const amount = parseFloat(input.value);
+            
+            if (isNaN(amount) || amount <= 0) return;
+            
+            saveSlots[currentSlotIndex].bank = (saveSlots[currentSlotIndex].bank || 0) + (isAdding ? amount : -amount);
+            
+            input.value = '';
+            saveData();
+            refreshDashboard();
+        }
+
+        function exportSlot() {
+            const slotData = saveSlots[currentSlotIndex];
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(slotData));
+            const anchor = document.createElement('a');
+            anchor.setAttribute("href", dataStr);
+            anchor.setAttribute("download", `pokemon_slot_${currentSlotIndex + 1}.json`);
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+        }
+
+        function importSlot(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (importedData.collections !== undefined) {
+                        saveSlots[currentSlotIndex] = importedData;
+                        saveData();
+                        refreshDashboard();
+                        if (!document.getElementById('view-collection').classList.contains('hidden')) {
+                            renderCollection();
+                        }
+                        document.getElementById('status-message').innerText = "Slot imported successfully!";
+                    } else {
+                        alert("Invalid save file format.");
+                    }
+                } catch (err) {
+                    alert("Error parsing JSON file.");
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ''; 
+        }
+
+        function saveData() {
+            localStorage.setItem('pokemonSaveSlots', JSON.stringify(saveSlots));
+        }
+
+        // --- 4. CARD LOADING & OPENING ---
         async function loadCardsForSet() {
             const setId = document.getElementById('set-select').value;
             if (!setId) return;
@@ -243,7 +430,6 @@
             document.getElementById('btn-open').disabled = true;
 
             try {
-                // Fetch all cards that belong to the selected set ID
                 const response = await fetch(CARDS_API_URL + setId + '&pageSize=250');
                 const data = await response.json();
                 
@@ -253,9 +439,8 @@
                 document.getElementById('status-message').innerText = `${setName} loaded! Ready to open packs.`;
                 document.getElementById('btn-open').disabled = false;
                 
-                updateCollectionCount();
+                refreshDashboard();
                 
-                // If user is currently looking at the collection menu, re-render it for the new set
                 if (!document.getElementById('view-collection').classList.contains('hidden')) {
                     renderCollection();
                 }
@@ -266,7 +451,6 @@
             }
         }
 
-        // --- 4. PACK OPENING LOGIC ---
         function getWeightForRarity(rarity) {
             if (!rarity) return 200; 
             const r = rarity.toLowerCase();
@@ -297,11 +481,24 @@
         }
 
         function openPack() {
+            const slot = saveSlots[currentSlotIndex];
             if (currentSetCards.length === 0) return;
+
+            const packCost = getCurrentPackCost();
+
+            // Bank Check
+            if ((slot.bank || 0) < packCost) {
+                document.getElementById('status-message').innerText = "Not enough funds in bank to open a pack!";
+                return;
+            }
+
+            // Deduct exact price tracked for the current set layout
+            slot.bank -= packCost;
+            saveData();
+            refreshDashboard();
             
             currentPackCards = [];
             for (let i = 0; i < 10; i++) {
-                // Pull heavily weighted odds from the CURRENT set only
                 currentPackCards.push(getRandomCardWeighted(currentSetCards));
             }
             
@@ -336,7 +533,6 @@
             `;
         }
 
-        // --- 5. CARD REVEAL & VALUE CALCULATION ---
         function getCardPrice(card) {
             if (card.tcgplayer && card.tcgplayer.prices) {
                 const prices = card.tcgplayer.prices;
@@ -358,17 +554,16 @@
             element.classList.add('revealed');
             const card = currentPackCards[currentCardIndex];
             const setId = document.getElementById('set-select').value;
+            const slot = saveSlots[currentSlotIndex];
             
-            // Calculate and add price
             const price = getCardPrice(card);
-            totalValue += price;
+            slot.totalValue = (slot.totalValue || 0) + price;
             
-            // Add to permanent collection mapped by specific SET ID
-            if (!playerCollections[setId]) {
-                playerCollections[setId] = [];
+            if (!slot.collections[setId]) {
+                slot.collections[setId] = [];
             }
             
-            playerCollections[setId].push({
+            slot.collections[setId].push({
                 id: card.id,
                 name: card.name,
                 image: card.images.small,
@@ -376,7 +571,7 @@
             });
             
             saveData();
-            updateValueDisplay();
+            refreshDashboard();
 
             setTimeout(() => {
                 const priceTag = document.getElementById('card-price');
@@ -402,44 +597,30 @@
             }
         }
 
-        // --- 6. DATA MANAGEMENT & UI ---
-        function saveData() {
-            localStorage.setItem('pokemonSetCollections', JSON.stringify(playerCollections));
-            localStorage.setItem('pokemonTotalValue', totalValue);
-            updateCollectionCount();
-        }
-
-        function updateValueDisplay() {
-            document.getElementById('total-value').innerText = `$${totalValue.toFixed(2)}`;
-        }
-
+        // --- 5. UI VIEWS & CLEANUP ---
         function updateCollectionCount() {
             const setId = document.getElementById('set-select').value;
-            const currentSetCollection = playerCollections[setId] || [];
+            const slot = saveSlots[currentSlotIndex];
+            const currentSetCollection = (slot.collections && slot.collections[setId]) ? slot.collections[setId] : [];
             document.getElementById('collection-count').innerText = currentSetCollection.length;
-        }
-
-        function recalculateTotalValue() {
-            let total = 0;
-            for (const setId in playerCollections) {
-                playerCollections[setId].forEach(card => {
-                    total += card.price;
-                });
-            }
-            totalValue = total;
-            saveData();
-            updateValueDisplay();
         }
 
         function clearCurrentSetCollection() {
             const setId = document.getElementById('set-select').value;
             const setName = document.getElementById('set-select').options[document.getElementById('set-select').selectedIndex].text;
+            const slot = saveSlots[currentSlotIndex];
             
-            if(confirm(`Are you sure you want to delete your entire collection for ${setName}?`)) {
-                playerCollections[setId] = [];
-                recalculateTotalValue(); // Fixes the global value to remove only this set's worth
+            if(confirm(`Are you sure you want to delete your entire collection for ${setName} in Save Slot ${currentSlotIndex + 1}?`)) {
+                if (slot.collections[setId]) {
+                    let setTotal = 0;
+                    slot.collections[setId].forEach(card => setTotal += card.price);
+                    slot.totalValue = Math.max(0, slot.totalValue - setTotal);
+                }
+
+                slot.collections[setId] = [];
+                saveData();
+                refreshDashboard();
                 renderCollection();
-                updateCollectionCount();
             }
         }
 
@@ -454,7 +635,8 @@
 
         function renderCollection() {
             const setId = document.getElementById('set-select').value;
-            const currentSetCollection = playerCollections[setId] || [];
+            const slot = saveSlots[currentSlotIndex];
+            const currentSetCollection = (slot.collections && slot.collections[setId]) ? slot.collections[setId] : [];
             
             const collectionDisplay = document.getElementById('collection-display');
             collectionDisplay.innerHTML = '';
@@ -476,7 +658,7 @@
         }
 
         // Start the engine
-        fetchSets();
+        init();
     </script>
 </body>
 </html>
